@@ -216,17 +216,14 @@ func Decode(pfxData []byte, password string) (privateKey interface{}, certificat
 		return nil, nil, err
 	}
 
-	if len(bags) != 2 {
-		err = errors.New("pkcs12: expected exactly two safe bags in the PFX PDU")
+	if len(bags) < 2 {
+		err = errors.New("pkcs12: expected at least two safe bags in the PFX PDU")
 		return
 	}
-
+	var certificates []*x509.Certificate
 	for _, bag := range bags {
 		switch {
 		case bag.Id.Equal(oidCertBag):
-			if certificate != nil {
-				err = errors.New("pkcs12: expected exactly one certificate bag")
-			}
 
 			certsData, err := decodeCertBag(bag.Value.Bytes)
 			if err != nil {
@@ -240,16 +237,26 @@ func Decode(pfxData []byte, password string) (privateKey interface{}, certificat
 				err = errors.New("pkcs12: expected exactly one certificate in the certBag")
 				return nil, nil, err
 			}
-			certificate = certs[0]
+			certificates = append(certificates, certs[0])
 
 		case bag.Id.Equal(oidPKCS8ShroundedKeyBag):
 			if privateKey != nil {
 				err = errors.New("pkcs12: expected exactly one key bag")
+				return nil, nil, err
 			}
 
 			if privateKey, err = decodePkcs8ShroudedKeyBag(bag.Value.Bytes, encodedPassword); err != nil {
 				return nil, nil, err
 			}
+		}
+	}
+
+	// find certificate for private key
+	privateN := privateKey.(*rsa.PrivateKey).N
+	for _, cert := range certificates {
+		if privateN.Cmp(cert.PublicKey.(*rsa.PublicKey).N) == 0 {
+			certificate = cert
+			break
 		}
 	}
 
